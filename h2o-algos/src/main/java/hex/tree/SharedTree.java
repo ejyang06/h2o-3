@@ -689,9 +689,14 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
           v = valid();
           startTree = -1;
         }
+        Log.info("MK: Scoring on validation set from startTree = " + startTree + ", key=" + _parms._valid.toString());
+        long s0 = System.currentTimeMillis();
         Score scv = new Score(this, startTree,false, vresponse()._key, _model._output.getModelCategory(), computeGainsLift)
                 .doAll(v, build_tree_one_node);
+        long s1 = System.currentTimeMillis();
         ModelMetrics mmv = scv.makeModelMetrics(_model,_parms.valid());
+        long s2 = System.currentTimeMillis();
+        Log.info("MK: Times = " + (s1 - s0) + "; " + (s2 - s1) + ", key=" + _parms._valid.toString());
         out._validation_metrics = mmv;
         if (_model._output._ntrees>0 || scoreZeroTrees()) //don't score the 0-tree model - the error is too large
           out._scored_valid[out._ntrees].fillFrom(mmv);
@@ -706,6 +711,7 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
         Log.info(_model.toString());
       }
       _timeLastScoreEnd = System.currentTimeMillis();
+      Log.info("MK: Time(doScoringAndSaveModel) = " + (_timeLastScoreEnd - now));
     }
 
     // Double update - after either scoring or variable importance
