@@ -8,6 +8,7 @@ import water.MRTask;
 import water.fvec.Chunk;
 import water.fvec.Frame;
 import water.fvec.Vec;
+import water.util.Log;
 
 /** Score the tree columns, and produce a confusion matrix and AUC
  */
@@ -97,7 +98,10 @@ public class Score extends MRTask<Score> {
 
   // Run after the doAll scoring to convert the MetricsBuilder to a ModelMetrics
   ModelMetricsSupervised makeModelMetrics(SharedTreeModel model, Frame fr) {
+    long s1 = System.currentTimeMillis();
     Frame preds = (model._output.nclasses()==2 && _computeGainsLift) || model._parms._distribution == DistributionFamily.huber ? model.score(fr) : null;
+    long s2 = System.currentTimeMillis();
+    Log.info("MK: Prediction Times = " + (s2 - s1) + ", key=" + fr._key.toString());
     ModelMetricsSupervised mms = (ModelMetricsSupervised) _mb.makeModelMetrics(model, fr, null, preds);
     if (preds != null) preds.remove();
     return mms;
