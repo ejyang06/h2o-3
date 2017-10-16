@@ -39,7 +39,10 @@ public class Score extends MRTask<Score> {
     _bldr = bldr; _is_train = is_train; _startTree = startTree; _oob = oob; _kresp = kresp; _mcat = mcat; _computeGainsLift = computeGainsLift;
   }
 
-  @Override public void map( Chunk chks[] ) {
+  @Override public void map(Chunk allchks[]) {
+    final Chunk[] chks = new Chunk[allchks.length - 1];
+    System.arraycopy(allchks, 0, chks, 0, chks.length); // FIXME: not optimal!!!
+
     Chunk ys = _bldr.chk_resp(chks);  // Response
     SharedTreeModel m = _bldr._model;
     Chunk weightsChunk = m._output.hasWeights() ? chks[m._output.weightsIdx()] : null;
@@ -84,12 +87,14 @@ public class Score extends MRTask<Score> {
       if( nclass > 1 ) cdists[0] = GenModel.getPrediction(cdists, m._output._priorClassDist, tmp, m.defaultThreshold()); // Fill in prediction
       val[0] = (float)ys.atd(row);
       _mb.perRow(cdists, val, weight, offset, m);
+      // FIXME: make generic (save the p1 prediction for binomial)
+      allchks[allchks.length - 1].set(row, 1.0 - cdists[cdists.length - 1]); // FIXME: this is just for binomial!!!
     }
   }
 
   @Override
   protected boolean modifiesVolatileVecs() {
-    return _startTree >= 0;
+    return true;
   }
 
   @Override public void reduce(Score t ) {
@@ -97,13 +102,19 @@ public class Score extends MRTask<Score> {
   }
 
   // Run after the doAll scoring to convert the MetricsBuilder to a ModelMetrics
-  ModelMetricsSupervised makeModelMetrics(SharedTreeModel model, Frame fr) {
-    long s1 = System.currentTimeMillis();
-    Frame preds = (model._output.nclasses()==2 && _computeGainsLift) || model._parms._distribution == DistributionFamily.huber ? model.score(fr) : null;
-    long s2 = System.currentTimeMillis();
-    Log.info("MK: Prediction Times = " + (s2 - s1) + ", key=" + fr._key.toString());
-    ModelMetricsSupervised mms = (ModelMetricsSupervised) _mb.makeModelMetrics(model, fr, null, preds);
-    if (preds != null) preds.remove();
-    return mms;
+  ModelMetricsSupervised makeModelMetrics(SharedTreeModel model, Frame fr, Vec pvec) {
+    if (_mb instanceof ModelMetricsBinomial.MetricBuilderBinomial) { // FIXME
+      ModelMetricsBinomial.MetricBuilderBinomial mbb = (ModelMetricsBinomial.MetricBuilderBinomial) _mb;
+      GainsLift gl = mbb.calculateGainsLift(model, pvec, _kresp.get(), fr.vec(model._output.weightsName()));
+      return (ModelMetricsSupervised) mbb.makeModelMetrics(model, fr, gl);
+    } else {
+      long s1 = System.currentTimeMillis();
+      Frame preds = (model._output.nclasses() == 2 && _computeGainsLift) || model._parms._distribution == DistributionFamily.huber ? model.score(fr) : null;
+      long s2 = System.currentTimeMillis();
+      Log.info("MK: Prediction Times = " + (s2 - s1) + ", key=" + fr._key.toString());
+      ModelMetricsSupervised mms = (ModelMetricsSupervised) _mb.makeModelMetrics(model, fr, null, preds);
+      if (preds != null) preds.remove();
+      return mms;
+    }
   }
 }

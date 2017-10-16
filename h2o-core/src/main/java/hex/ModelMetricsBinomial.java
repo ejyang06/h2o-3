@@ -170,34 +170,48 @@ public class ModelMetricsBinomial extends ModelMetricsSupervised {
      * @return
      */
     @Override public ModelMetrics makeModelMetrics(Model m, Frame f, Frame frameWithWeights, Frame preds) {
-      if (frameWithWeights ==null) frameWithWeights = f;
+      GainsLift gl = null;
+      if (_wcount > 0) {
+        if (preds!=null) {
+          Vec resp = m==null && f.vec(f.numCols()-1).isCategorical() ? f.vec(f.numCols()-1) //work-around for the case where we don't have a model, assume that the last column is the actual response
+                  : f.vec(m._parms._response_column);
+          if (resp != null) {
+            if (frameWithWeights ==null) frameWithWeights = f;
+            Vec weight = m==null?null : frameWithWeights.vec(m._parms._weights_column);
+            gl = calculateGainsLift(m, preds.lastVec(), resp, weight);
+          }
+        }
+      }
+      return makeModelMetrics(m, f, gl);
+    }
+
+    public ModelMetrics makeModelMetrics(Model m, Frame f, GainsLift gl) {
       double mse = Double.NaN;
       double logloss = Double.NaN;
       double sigma = Double.NaN;
       AUC2 auc = null;
-      GainsLift gl = null;
       if (_wcount > 0) {
         sigma = weightedSigma();
         mse = _sumsqe / _wcount;
         logloss = _logloss / _wcount;
         auc = new AUC2(_auc);
-        gl = null;
-        if (preds!=null) {
-          Vec resp = m==null && f.vec(f.numCols()-1).isCategorical() ? f.vec(f.numCols()-1) //work-around for the case where we don't have a model, assume that the last column is the actual response
-                  : f.vec(m._parms._response_column);
-          Vec weight = m==null?null : frameWithWeights.vec(m._parms._weights_column);
-          if (resp != null) {
-            try {
-              gl = new GainsLift(preds.lastVec(), resp, weight);
-              gl.exec(m != null ? m._output._job : null);
-            } catch(Throwable t) {}
-          }
-        }
       }
       ModelMetricsBinomial mm = new ModelMetricsBinomial(m, f, _count, mse, _domain, sigma, auc,  logloss, gl);
       if (m!=null) m.addModelMetrics(mm);
       return mm;
     }
+
+    public GainsLift calculateGainsLift(Model m, Vec p1, Vec resp, Vec weight) { // FIXME: should not be public with this catch!
+      GainsLift gl = null;
+      try {
+        gl = new GainsLift(p1, resp, weight);
+        gl.exec(m != null ? m._output._job : null);
+      } catch(Throwable t) {
+        t.printStackTrace();
+      }
+      return gl;
+    }
+
     public String toString(){
       if(_wcount == 0) return "empty, no rows";
       return "auc = " + MathUtils.roundToNDigits(auc(),3) + ", logloss = " + _logloss / _wcount;

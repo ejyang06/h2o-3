@@ -67,6 +67,9 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
   protected final Frame validWorkspace() { return _validWorkspace; }
   protected transient Frame _validWorkspace;
 
+  protected transient Vec _pvec;
+  protected transient Vec _pvvec;
+
   public boolean isSupervised(){return true;}
 
   @Override public boolean haveMojo() { return true; }
@@ -332,8 +335,11 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
         // Append number of trees participating in on-the-fly scoring
         _train.add("OUT_BAG_TREES", _response.makeZero());
 
-        if (_valid != null)
+        if (_valid != null) {
           _validWorkspace = makeValidWorkspace();
+          _pvvec = _vresponse.makeVolatileDoubles(1)[0];
+        }
+        _pvec = _response.makeVolatileDoubles(1)[0];
 
         // Variable importance: squared-error-improvement-per-variable-per-split
         _improvPerVar = new float[_ncols];
@@ -350,6 +356,10 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
           _validWorkspace.remove();
           _validWorkspace = null;
         }
+        if (_pvvec != null)
+          _pvvec.remove();
+        if (_pvec != null)
+          _pvec.remove();
       }
     }
 
@@ -669,32 +679,33 @@ public abstract class SharedTree<M extends SharedTreeModel<M,P,O>, P extends Sha
 
       // Score on training data
       _job.update(0,"Scoring the model.");
+      Frame tf = new Frame(train());
+      tf.add("pvec", _pvec);
       _model._output._job = _job; // to allow to share the job for quantiles task
-      Score sc = new Score(this,_model._output._ntrees>0/*score 0-tree model from scratch*/,oob,response()._key,_model._output.getModelCategory(),computeGainsLift).doAll(train(), build_tree_one_node);
-      ModelMetrics mm = sc.makeModelMetrics(_model, _parms.train());
+      Score sc = new Score(this,_model._output._ntrees>0/*score 0-tree model from scratch*/,oob,response()._key,_model._output.getModelCategory(),computeGainsLift).doAll(tf, build_tree_one_node);
+      ModelMetrics mm = sc.makeModelMetrics(_model, _parms.train(), _pvec);
       out._training_metrics = mm;
       if (oob) out._training_metrics._description = "Metrics reported on Out-Of-Bag training samples";
       out._scored_train[out._ntrees].fillFrom(mm);
 
       // Score again on validation data
       if( _parms._valid != null) {
-        Frame v;
+        Frame v = new Frame(valid());
         int startTree;
         if (validWorkspace() != null) {
-          v = new Frame(valid()).add(validWorkspace());
+          v = v.add(validWorkspace());
           for (startTree = out._scored_valid.length - 1; startTree > 0; startTree--)
             if (! Double.isNaN(out._scored_valid[startTree]._rmse))
               break;
-        } else {
-          v = valid();
+        } else
           startTree = -1;
-        }
+        v.add("pvvec", _pvvec);
         Log.info("MK: Scoring on validation set from startTree = " + startTree + ", key=" + _parms._valid.toString());
         long s0 = System.currentTimeMillis();
         Score scv = new Score(this, startTree,false, vresponse()._key, _model._output.getModelCategory(), computeGainsLift)
                 .doAll(v, build_tree_one_node);
         long s1 = System.currentTimeMillis();
-        ModelMetrics mmv = scv.makeModelMetrics(_model,_parms.valid());
+        ModelMetrics mmv = scv.makeModelMetrics(_model, _parms.valid(), _pvvec);
         long s2 = System.currentTimeMillis();
         Log.info("MK: Times = " + (s1 - s0) + "; " + (s2 - s1) + ", key=" + _parms._valid.toString());
         out._validation_metrics = mmv;
